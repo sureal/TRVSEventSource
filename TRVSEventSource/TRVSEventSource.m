@@ -22,7 +22,6 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
     TRVSEventSourceFailed
 };
 
-
 @interface TRVSEventSource ()
 // Private writable, public readable
 @property(nonatomic, strong, readwrite) NSURL *URL;
@@ -35,7 +34,9 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 @property(nonatomic, strong) NSMapTable *listenersKeyedByEvent;
 @property(nonatomic, strong) NSMutableString *buffer;
 
-- (NSDictionary *)extractSSEFieldsFromString:(NSString *)string withError:(NSError *__autoreleasing *) error;
+- (NSDictionary *)extractSSEFieldsFromString:(NSString *)string withError:(NSError *__autoreleasing *)error;
+
+- (NSError *)extractErrorFromResponse:(NSURLResponse *)response receivedContent:(NSString *)content;
 
 @end
 
@@ -61,7 +62,7 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 
     self.operationQueue = [[NSOperationQueue alloc] init];
     self.operationQueue.name = TRVSEventSourceOperationQueueName;
-	self.operationQueue.maxConcurrentOperationCount = 1;
+    self.operationQueue.maxConcurrentOperationCount = 1;
     self.URL = URL;
     self.listenersKeyedByEvent =
             [[NSMapTable alloc] initWithKeyOptions:NSPointerFunctionsCopyIn
@@ -154,7 +155,7 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 #pragma mark - NSURLSessionTaskDelegate (parent of NSURLSessionDataDelegate)
 
 
-- (void)  URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
 
     // "Sent as the last message related to a specific task.  Error may be nil,
     // which implies that no error occurred and this task is complete."
@@ -164,7 +165,7 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
     } else {
 
         // If no error was passed, the session has just closed
-        if(!error) {
+        if (!error) {
 
 //            NSLog(@"TRVSEventSource URLSession did complete with Error but with Error = nil. Close session.");
             [self transitionToClosed];
@@ -177,29 +178,39 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 
 #pragma mark - NSURLSessionDataDelegate
 
+- (NSError *)extractErrorFromResponse:(NSURLResponse *)response receivedContent:(NSString *)content {
+    // Check for HTTP Status code different to 200 - OK
+    // If not 200, fail with error (Super simple handling without automatic async. reconnect attempts (as suggested in http://www.w3.org/TR/eventsource/#processing-model)
+    if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
+        NSHTTPURLResponse *httpURLResponse = (NSHTTPURLResponse *) response;
+        NSInteger httpStatus = httpURLResponse.statusCode;
+        if (httpStatus != 200) {
+            NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+            [userInfo setValue:@(httpStatus) forKey:TRVSEventSourceHttpStatus];
+            [userInfo setValue:content forKey:TRVSEventSourceErrorContent];
+            NSError *receivedError = [NSError errorWithDomain:@"HTTP Error" code:httpStatus userInfo:userInfo];
+
+            return receivedError;
+        }
+    }
+
+    // no error found
+    return nil;
+}
 
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data {
 
     // Decode received data to string
     NSString *string = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
 
-    // Check for HTTP Status code different to 200 - OK
-    // If not 200, fail with error (Super simple handling without automatic async. reconnect attempts (as suggested in http://www.w3.org/TR/eventsource/#processing-model)
-    if([dataTask.response isKindOfClass:[NSHTTPURLResponse class]]) {
-        NSHTTPURLResponse* httpURLResponse = (NSHTTPURLResponse *) dataTask.response;
-        NSInteger httpStatus = httpURLResponse.statusCode;
-        if(httpStatus != 200) {
-            NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
-            [userInfo setValue:@(httpStatus) forKey:TRVSEventSourceHttpStatus];
-            [userInfo setValue:string forKey:TRVSEventSourceErrorContent];
-            NSError *receivedError = [NSError errorWithDomain:@"HTTP Error" code:httpStatus userInfo:userInfo];
-
-            // propagate error
-            [self transitionToFailedWithError:receivedError];
-            // stop processing
-            return;
-        }
+    NSError *receivedError = [self extractErrorFromResponse:dataTask.response receivedContent:string];
+    if (receivedError) {
+        // propagate error
+        [self transitionToFailedWithError:receivedError];
+        // stop processing
+        return;
     }
+
 
     // Append received stream part as a string to the string buffer
     [self.buffer appendString:string];
@@ -257,7 +268,6 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 }
 
 
-
 #pragma NSCoding
 
 - (id)initWithCoder:(NSCoder *)aDecoder {
@@ -281,7 +291,6 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 }
 
 
-
 #pragma mark - State Transitions
 
 - (void)transitionToConnecting {
@@ -294,8 +303,9 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 }
 
 - (void)transitionToOpenIfNeeded {
-    if (self.state != TRVSEventSourceConnecting)
+    if (self.state != TRVSEventSourceConnecting) {
         return;
+    }
 
     self.state = TRVSEventSourceOpen;
 
@@ -331,17 +341,18 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 
 #pragma mark - SSE Event Message format interpretation
 
-- (NSDictionary *)extractSSEFieldsFromString:(NSString *)string withError:(NSError *__autoreleasing *) error
-{
-    if (!string || [string length] == 0)
+- (NSDictionary *)extractSSEFieldsFromString:(NSString *)string withError:(NSError *__autoreleasing *)error {
+    if (!string || [string length] == 0) {
         return nil;
+    }
 
     NSMutableDictionary *mutableFields = [NSMutableDictionary dictionary];
 
     for (NSString *line in [string componentsSeparatedByCharactersInSet:
             [NSCharacterSet newlineCharacterSet]]) {
-        if (!line || [line length] == 0 || [line hasPrefix:@":"])
+        if (!line || [line length] == 0 || [line hasPrefix:@":"]) {
             continue;
+        }
 
         @autoreleasepool {
             NSScanner *scanner = [[NSScanner alloc] initWithString:line];
@@ -364,7 +375,6 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 
     return mutableFields;
 }
-
 
 
 @end
