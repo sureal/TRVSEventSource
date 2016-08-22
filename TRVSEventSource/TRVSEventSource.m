@@ -61,6 +61,7 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 
     self.operationQueue = [[NSOperationQueue alloc] init];
     self.operationQueue.name = TRVSEventSourceOperationQueueName;
+	self.operationQueue.maxConcurrentOperationCount = 1;
     self.URL = URL;
     self.listenersKeyedByEvent =
             [[NSMapTable alloc] initWithKeyOptions:NSPointerFunctionsCopyIn
