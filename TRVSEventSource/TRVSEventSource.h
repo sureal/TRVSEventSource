@@ -14,6 +14,14 @@
 
 typedef void (^TRVSEventSourceEventHandler)(TRVSServerSentEvent *event, NSError *error);
 
+/**
+ * If a error is received (HTTP Status != 200) a NSError object is thrown with a userInfo dictionary using this key for HTTP Status of the response
+ */
+FOUNDATION_EXPORT NSString *const TRVSEventSourceHttpStatus;
+/**
+ * If a error is received (HTTP Status != 200) a NSError object is thrown with a userInfo dictionary using this key for error the response
+ */
+FOUNDATION_EXPORT NSString *const TRVSEventSourceErrorContent;
 
 /**
  `TRVSEventSource` is an Objective-C implementation of the EventSource DOM interface supported by modern browsers.
@@ -22,7 +30,7 @@ typedef void (^TRVSEventSourceEventHandler)(TRVSServerSentEvent *event, NSError 
  
  @see http://www.w3.org/TR/eventsource/
  */
-@interface TRVSEventSource : NSObject <NSURLSessionDelegate, NSURLSessionDataDelegate, NSCopying, NSCoding>
+@interface TRVSEventSource : NSObject <NSCopying, NSCoding>
 
 // The URL the event source receives events from.
 @property (nonatomic, strong, readonly) NSURL *URL;
