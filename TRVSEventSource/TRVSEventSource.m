@@ -286,15 +286,16 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 
 - (void)transitionToConnecting {
     self.state = TRVSEventSourceConnecting;
-    [self.buffer setString:@""];
+    [self.operationQueue addOperationWithBlock:^{
+        [self.buffer setString:@""];
+    }];
     self.URLSessionTask = [self.URLSession dataTaskWithURL:self.URL];
     [self.URLSessionTask resume];
 }
 
 - (void)transitionToOpenIfNeeded {
-    if (self.state != TRVSEventSourceConnecting) {
+    if (self.state != TRVSEventSourceConnecting)
         return;
-    }
 
     self.state = TRVSEventSourceOpen;
 
@@ -314,7 +315,9 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 
 - (void)transitionToClosing {
     self.state = TRVSEventSourceClosing;
-    [self.buffer setString:@""];
+    [self.operationQueue addOperationWithBlock:^{
+        [self.buffer setString:@""];
+    }];
     [self.URLSession invalidateAndCancel];
 }
 
@@ -330,17 +333,15 @@ typedef NS_ENUM(NSUInteger, TRVSEventSourceState) {
 
 - (NSDictionary *)extractSSEFieldsFromString:(NSString *)string withError:(NSError *__autoreleasing *) error
 {
-    if (!string || [string length] == 0) {
+    if (!string || [string length] == 0)
         return nil;
-    }
 
     NSMutableDictionary *mutableFields = [NSMutableDictionary dictionary];
 
     for (NSString *line in [string componentsSeparatedByCharactersInSet:
             [NSCharacterSet newlineCharacterSet]]) {
-        if (!line || [line length] == 0 || [line hasPrefix:@":"]) {
+        if (!line || [line length] == 0 || [line hasPrefix:@":"])
             continue;
-        }
 
         @autoreleasepool {
             NSScanner *scanner = [[NSScanner alloc] initWithString:line];
